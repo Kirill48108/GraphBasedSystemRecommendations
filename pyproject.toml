@@ -3,7 +3,7 @@ name = "graphbasedsystemrecommendations"
 version = "0.1.0"
 description = ""
 authors = ["kirill <kirill48108@gmail.com>"]
-readme = "README.md"
+readme = "README.MD"
 
 [tool.poetry.dependencies]
 python = ">=3.13,<3.14"
