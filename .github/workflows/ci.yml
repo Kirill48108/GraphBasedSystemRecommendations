@@ -1,0 +1,78 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+
+    services:
+      arangodb:
+        image: arangodb:latest
+        env:
+          ARANGO_ROOT_PASSWORD: password
+        ports:
+          - 8529:8529
+        options: >-
+          --health-cmd="curl -f http://localhost:8529/_api/version || exit 1"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd="redis-cli ping || exit 1"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+
+    env:
+      ARANGO_URL: http://127.0.0.1:8529
+      ARANGO_DB: movies
+      ARANGO_USER: root
+      ARANGO_PASSWORD: password
+      REDIS_URL: redis://127.0.0.1:6379/0
+      SECRET_KEY: "ci_dummy_secret_key"
+      JWT_ALGORITHM: "HS256"
+      ACCESS_TOKEN_EXPIRE_MINUTES: 60
+      AB_SEED: 42
+      DEFAULT_VARIANT: "A"
+      REC_TTL_HOURS: 1
+      RATE_LIMIT_REQUESTS_PER_MINUTE: 1000
+      DEMO_ADMIN_USERNAME: "admin"
+      DEMO_ADMIN_PASSWORD: "admin"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install Poetry
+        run: pip install poetry
+
+      - name: Install dependencies
+        run: poetry install
+
+      - name: Init Arango schema
+        run: poetry run python -m scripts.init_arango
+
+      - name: Create demo admin
+        run: poetry run python -m scripts.create_demo_admin
+
+      - name: Ruff lint
+        run: poetry run ruff check app tests
+
+      - name: Mypy type check
+        run: poetry run mypy app
+
+      - name: Run tests with coverage
+        run: poetry run pytest --cov=app --cov-report=term-missing
