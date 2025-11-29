@@ -1,0 +1,116 @@
+version: "3.9"
+
+services:
+  arangodb:
+    image: arangodb:latest
+    container_name: arangodb
+    environment:
+      # root-пароль для Arango. В демо можно оставить, в проде — заменить.
+      ARANGO_ROOT_PASSWORD: ${ARANGO_PASSWORD}
+    ports:
+      - "8529:8529"
+    volumes:
+      - arango_data:/var/lib/arangodb3
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+
+  api:
+    build: .
+    container_name: movie-recommender-api
+    depends_on:
+      - arangodb
+      - redis
+    environment:
+      # Настройки приложения
+      APP_NAME: ${APP_NAME}
+      APP_VERSION: ${APP_VERSION}
+
+      # ArangoDB
+      ARANGO_URL: ${ARANGO_URL}
+      ARANGO_DB: ${ARANGO_DB}
+      ARANGO_USER: ${ARANGO_USER}
+      ARANGO_PASSWORD: ${ARANGO_PASSWORD}
+
+      # Redis
+      REDIS_URL: ${REDIS_URL}
+
+      # Безопасность / JWT
+      SECRET_KEY: ${SECRET_KEY}
+      JWT_ALGORITHM: ${JWT_ALGORITHM}
+      ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES}
+
+      # A/B
+      AB_SEED: ${AB_SEED}
+      DEFAULT_VARIANT: ${DEFAULT_VARIANT}
+
+      # Кэш
+      REC_TTL_HOURS: ${REC_TTL_HOURS}
+
+      # Rate limiting
+      RATE_LIMIT_REQUESTS_PER_MINUTE: ${RATE_LIMIT_REQUESTS_PER_MINUTE}
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+
+  celery-worker:
+    build: .
+    container_name: movie-recommender-celery
+    depends_on:
+      - api
+      - redis
+      - arangodb
+    environment:
+      ARANGO_URL: ${ARANGO_URL}
+      ARANGO_DB: ${ARANGO_DB}
+      ARANGO_USER: ${ARANGO_USER}
+      ARANGO_PASSWORD: ${ARANGO_PASSWORD}
+      REDIS_URL: ${REDIS_URL}
+      SECRET_KEY: ${SECRET_KEY}
+      AB_SEED: ${AB_SEED}
+      DEFAULT_VARIANT: ${DEFAULT_VARIANT}
+      REC_TTL_HOURS: ${REC_TTL_HOURS}
+      RATE_LIMIT_REQUESTS_PER_MINUTE: ${RATE_LIMIT_REQUESTS_PER_MINUTE}
+    command: >
+      celery -A app.worker.celery_app.celery_app worker --loglevel=INFO
+    restart: unless-stopped
+
+  airflow:
+    image: apache/airflow:3.1.3-python3.13
+    container_name: movie-recommender-airflow
+    depends_on:
+      - arangodb
+      - redis
+    environment:
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__CORE__LOAD_EXAMPLES: "False"
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: sqlite:////opt/airflow/airflow.db
+      AIRFLOW__WEBSERVER__RBAC: "True"
+      AIRFLOW__WEBSERVER__DEFAULT_USER_ROLE: Admin
+
+      ARANGO_URL: ${ARANGO_URL}
+      ARANGO_DB: ${ARANGO_DB}
+      ARANGO_USER: ${ARANGO_USER}
+      ARANGO_PASSWORD: ${ARANGO_PASSWORD}
+    volumes:
+      - ./dags:/opt/airflow/dags
+    ports:
+      - "8080:8080"
+    command: >
+      bash -c "
+        pip install --no-cache-dir python-arango &&
+        airflow db migrate &&
+        airflow standalone
+      "
+    restart: unless-stopped
+
+volumes:
+  arango_data:
+  redis_data:
